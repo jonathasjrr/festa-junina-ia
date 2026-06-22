@@ -132,7 +132,7 @@ if user_input:
             with st.chat_message("assistant"):
                 st.write(resposta_ia)
         except Exception as e:
-            st.error("Ops, tive um pequeno problema para pensar. Tente novamente!")
+       st.error(f"Erro detalhado: {e}")
 
 # ==========================================
 # SESSÃO DE UPLOAD DO PIX
