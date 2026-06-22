@@ -32,7 +32,7 @@ if c.fetchone()[0] == 0:
         ('Pastel', 'Salgado', 'Pendente', 'Pendente'),
         ('Quentão', 'Bebida', 'Pendente', 'Pendente')
     ]
-    c.executeany("INSERT INTO cardapio (item, categoria, responsavel, status) VALUES (?, ?, ?, ?)", itens_iniciais)
+    c.executemany("INSERT INTO cardapio (item, categoria, responsavel, status) VALUES (?, ?, ?, ?)", itens_iniciais)
     conn.commit()
 
 def buscar_estado_festa():
