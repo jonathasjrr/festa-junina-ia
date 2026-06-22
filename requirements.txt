@@ -2,3 +2,5 @@ streamlit
 google-generativeai
 pillow
 requests
+st-gsheets-connection
+pandas
