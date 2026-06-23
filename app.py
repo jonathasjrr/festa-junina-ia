@@ -77,8 +77,8 @@ def formatar_cardapio_para_ia(df):
     return texto
 
 def get_gemini_model():
-    # Trocando para o modelo clássico que é 100% compatível
-    return genai.GenerativeModel('gemini-pro')
+    # Usando o modelo atualizado e ativo do Google
+    return genai.GenerativeModel('gemini-2.5-flash')
 
 # ==========================================
 # INTERFACE VISUAL
@@ -109,7 +109,7 @@ if user_input:
 
     with st.spinner("Espiando na planilha..."):
         try:
-            modelo = get_gemini_model()
+            modelo_visao = genai.GenerativeModel('gemini-2.5-flash')
             
             df_atual = buscar_dados_planilha()
             dados_festa = formatar_cardapio_para_ia(df_atual)
