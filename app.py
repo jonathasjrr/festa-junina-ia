@@ -96,8 +96,8 @@ if user_input:
 
     with st.spinner("Espiando na planilha..."):
         try:
-            # === AQUI ESTÁ A VARIÁVEL QUE FALTAVA ===
-            modelo = genai.GenerativeModel('gemini-1.5-flash')
+            # === CORREÇÃO AQUI: Usando o gemini-pro ===
+            modelo = genai.GenerativeModel('gemini-pro')
             
             df_atual = buscar_dados_planilha()
             dados_festa = formatar_cardapio_para_ia(df_atual)
@@ -154,7 +154,8 @@ if arquivo_foto:
     
     with st.spinner('Lendo o comprovante...'):
         try:
-            modelo_visao = genai.GenerativeModel('gemini-1.5-flash')
+            # === CORREÇÃO AQUI: Usando o modelo de visão compatível ===
+            modelo_visao = genai.GenerativeModel('gemini-pro-vision')
             prompt_ocr = "Analise esta imagem. Isto é um comprovante de Pix válido? Se sim, leia o documento e me devolva APENAS o nome de quem pagou e o valor no formato: 'Nome da Pessoa - R$ Valor'. Se não for um comprovante Pix, diga apenas 'Inválido'."
             
             resultado = modelo_visao.generate_content([prompt_ocr, imagem]).text
