@@ -13,13 +13,45 @@ else:
     st.error("Por favor, configure a chave GEMINI_KEY nos Secrets do Streamlit.")
 
 # ==========================================
+# DETECÇÃO AUTOMÁTICA DE MODELO (Fim do erro 404!)
+# ==========================================
+@st.cache_resource
+def obter_modelo_seguro():
+    """
+    Busca dinamicamente qual modelo está disponível para a sua chave de API.
+    Assim, não importa se o Google mudar os nomes amanhã, o código não quebra.
+    """
+    try:
+        modelos_disponiveis = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                # Limpa a string tirando o "models/" do começo, se vier
+                nome_limpo = m.name.replace('models/', '')
+                modelos_disponiveis.append(nome_limpo)
+        
+        # Prioridade 1: Tentar pegar qualquer versão do 'flash' (lê texto e imagem super rápido)
+        for modelo in modelos_disponiveis:
+            if 'flash' in modelo.lower():
+                return modelo
+                
+        # Prioridade 2: Se não tiver flash, pega o primeiro que a API disse que funciona
+        if modelos_disponiveis:
+            return modelos_disponiveis[0]
+            
+        return 'gemini-1.5-flash' # Fallback de segurança
+    except Exception as e:
+        return 'gemini-1.5-flash'
+
+# Carrega o nome do modelo que realmente existe na sua conta
+MODELO_ATUAL = obter_modelo_seguro()
+
+# ==========================================
 # CONEXÃO DIRETA COM O GOOGLE SHEETS
 # ==========================================
 URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1ao4BKfUHK7C_jmuJUPwwXwhpy2e7IhVjdAId6QyAMrE/edit?usp=sharing"
 conn_sheets = st.connection("gsheets", type=GSheetsConnection)
 
 def buscar_dados_planilha():
-    # Lê a planilha atualizada em tempo real
     df = conn_sheets.read(spreadsheet=URL_PLANILHA, ttl=5)
     return df
 
@@ -75,6 +107,9 @@ st.set_page_config(page_title="IA da nossa Festa Junina!", page_icon="🔥")
 st.title("🤠 Assistente da nossa Festa Junina!")
 st.write("Olá! Eu ajudo a organizar nosso Arraiá. Pergunte-me o que falta trazer ou envie o comprovante do Pix!")
 
+# Só pra gente ter certeza de qual modelo ele escolheu, ele vai avisar bem pequenininho:
+st.caption(f"🧠 Conectado com sucesso usando o modelo: {MODELO_ATUAL}")
+
 st.sidebar.header("📍 Informações Importantes")
 st.sidebar.write("**Endereço:** Rua das Bandeirinhas, nº 123 - Bairro Centro")
 st.sidebar.write("**Horário:** Sábado, a partir das 18:00")
@@ -96,8 +131,8 @@ if user_input:
 
     with st.spinner("Espiando na planilha..."):
         try:
-            # === CORREÇÃO AQUI: Usando o gemini-pro ===
-            modelo = genai.GenerativeModel('gemini-pro')
+            # === Usando o modelo dinâmico detectado ===
+            modelo = genai.GenerativeModel(MODELO_ATUAL)
             
             df_atual = buscar_dados_planilha()
             dados_festa = formatar_cardapio_para_ia(df_atual)
@@ -154,8 +189,8 @@ if arquivo_foto:
     
     with st.spinner('Lendo o comprovante...'):
         try:
-            # === CORREÇÃO AQUI: Usando o modelo de visão compatível ===
-            modelo_visao = genai.GenerativeModel('gemini-pro-vision')
+            # === Usando o mesmo modelo dinâmico detectado para ler imagens ===
+            modelo_visao = genai.GenerativeModel(MODELO_ATUAL)
             prompt_ocr = "Analise esta imagem. Isto é um comprovante de Pix válido? Se sim, leia o documento e me devolva APENAS o nome de quem pagou e o valor no formato: 'Nome da Pessoa - R$ Valor'. Se não for um comprovante Pix, diga apenas 'Inválido'."
             
             resultado = modelo_visao.generate_content([prompt_ocr, imagem]).text
