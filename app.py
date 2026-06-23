@@ -13,13 +13,10 @@ else:
     st.error("Por favor, configure a chave GEMINI_KEY nos Secrets do Streamlit.")
 
 # ==========================================
-# DETECÇÃO AUTOMÁTICA DE MODELO (Fim do erro 404!)
+# DETECÇÃO AUTOMÁTICA DE MODELO
 # ==========================================
 @st.cache_resource
 def obter_modelo_seguro():
-    """
-    Busca dinamicamente qual modelo está ativo e disponível para a sua chave de API.
-    """
     try:
         modelos_disponiveis = []
         for m in genai.list_models():
@@ -27,7 +24,6 @@ def obter_modelo_seguro():
                 nome_limpo = m.name.replace('models/', '')
                 modelos_disponiveis.append(nome_limpo)
         
-        # Procura por qualquer variação do 'flash' que esteja ativa
         for modelo in modelos_disponiveis:
             if 'flash' in modelo.lower():
                 return modelo
@@ -39,7 +35,6 @@ def obter_modelo_seguro():
     except Exception as e:
         return 'gemini-1.5-flash'
 
-# Garante o modelo correto para o seu ambiente
 MODELO_ATUAL = obter_modelo_seguro()
 
 # ==========================================
@@ -49,7 +44,7 @@ URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1ao4BKfUHK7C_jmuJUPwwXwhp
 conn_sheets = st.connection("gsheets", type=GSheetsConnection)
 
 def buscar_dados_planilha():
-    # Força a leitura específica da aba de "Itens"
+    # IMPORTANTE: A sua aba no Google Sheets DEVE se chamar "Itens"
     df = conn_sheets.read(spreadsheet=URL_PLANILHA, worksheet="Itens", ttl=5)
     return df
 
@@ -69,12 +64,8 @@ def atualizar_reserva_planilha(item_nome, pessoa_nome):
     
     if item_procurado in df['Item_Lower'].values:
         idx = df[df['Item_Lower'] == item_procurado].index[0]
-        
-        # Atualiza o nome da pessoa na coluna correta
         df.at[idx, coluna_responsavel] = pessoa_nome
-        
         df = df.drop(columns=['Item_Lower'])
-        # Grava de volta garantindo que está salvando na aba "Itens"
         conn_sheets.update(spreadsheet=URL_PLANILHA, worksheet="Itens", data=df)
         return True
     return False
@@ -94,7 +85,6 @@ def formatar_cardapio_para_ia(df):
         item = row[coluna_item]
         responsavel = row.get(coluna_responsavel, "em branco")
         
-        # Se estiver vazio, nulo ou escrito "em branco", o item está disponível
         if pd.isna(responsavel) or str(responsavel).strip().lower() in ["em branco", ""]:
             texto += f"- {item}: DISPONÍVEL\n"
         else:
@@ -109,9 +99,6 @@ st.set_page_config(page_title="IA da nossa Festa Junina!", page_icon="🔥")
 
 st.title("🤠 Assistente da nossa Festa Junina!")
 st.write("Olá! Eu ajudo a organizar nosso Arraiá. Pergunte-me o que falta trazer ou envie o comprovante do Pix!")
-
-# Informação discreta de diagnóstico do modelo
-st.caption(f"🧠 Sistema conectado automaticamente usando o modelo: **{MODELO_ATUAL}**")
 
 st.sidebar.header("📍 Informações Importantes")
 st.sidebar.write("**Endereço:** Rua das Bandeirinhas, nº 123 - Bairro Centro")
@@ -132,12 +119,18 @@ if user_input:
     with st.chat_message("user"):
         st.write(user_input)
 
-    with st.spinner("Espiando na planilha..."):
+    with st.spinner("Espiando na planilha e chamando a IA..."):
+        # PASSO 1: Tenta ler a planilha de forma isolada
         try:
-            modelo = genai.GenerativeModel(MODELO_ATUAL)
-            
             df_atual = buscar_dados_planilha()
             dados_festa = formatar_cardapio_para_ia(df_atual)
+        except Exception as e:
+            st.error(f"❌ ERRO DE PLANILHA: Verifique se o nome da aba lá embaixo no Google Sheets é exatamente 'Itens'. Detalhe: {e}")
+            st.stop() # Para a execução aqui para não dar erro na IA
+
+        # PASSO 2: Tenta enviar a mensagem para a IA usando formato seguro (Texto Único)
+        try:
+            modelo = genai.GenerativeModel(MODELO_ATUAL)
             
             prompt_sistema = f"""
             Você é um organizador de festa junina muito simpático, caipira, prestativo e paciente.
@@ -150,12 +143,15 @@ if user_input:
             
             REGRAS OBRIGATÓRIAS DE COMPORTAMENTO:
             1. Use bastante o sotaque caipira e emojis caipiras (🌽🤠🔥).
-            2. Se o usuário perguntar o que está faltando ou o que tem na lista, você deve listar TODOS os itens marcados como DISPONÍVEL que estão nos dados acima. É EXPRESSAMENTE PROIBIDO resumir, ocultar itens ou inventar opções que não estejam na lista enviada (como por exemplo 'decoração extra' ou coisas que não são comida). Se está na lista acima como DISPONÍVEL, mostre para ele!
-            3. Se o usuário disser explicitamente que quer trazer um item que está marcado como DISPONÍVEL e disser o seu próprio nome, responda iniciando sua mensagem EXATAMENTE com a tag estruturada [RESERVA: NomeDoItem | NomeDaPessoa]. 
-            4. ⚠️ CASO O USUÁRIO NÃO SE IDENTIFIQUE (não disser o nome dele ao escolher um prato): Não use a tag de reserva! Peça o nome dele de maneira muito educada, divertida e carinhosa com sotaque caipira antes de poder confirmar (ex: 'Opa cumadi/cumpadi! Que lindeza que cê quer trazer esse trem bão! Mas me diz uma coisa... qual que é o seu nome pra eu anotar direitinho aqui no meu caderninho?').
+            2. Se o usuário perguntar o que está faltando ou o que tem na lista, você deve listar TODOS os itens marcados como DISPONÍVEL que estão nos dados acima. É EXPRESSAMENTE PROIBIDO resumir, ocultar itens ou inventar opções.
+            3. Se o usuário disser que quer trazer um item que está marcado como DISPONÍVEL e disser o seu próprio nome, responda iniciando sua mensagem EXATAMENTE com a tag estruturada [RESERVA: NomeDoItem | NomeDaPessoa]. 
+            4. CASO O USUÁRIO NÃO SE IDENTIFIQUE: Não use a tag de reserva! Peça o nome dele de maneira muito educada, divertida e carinhosa com sotaque caipira antes de poder confirmar.
             """
             
-            resposta_ia = modelo.generate_content([prompt_sistema, user_input]).text
+            # FORMATO BLINDADO CONTRA ERRO 400: Transformar tudo em uma única grande String
+            prompt_completo_seguro = f"{prompt_sistema}\n\n[MENSAGEM DO USUÁRIO]: {user_input}"
+            
+            resposta_ia = modelo.generate_content(prompt_completo_seguro).text
             
             if "[RESERVA:" in resposta_ia:
                 try:
@@ -176,8 +172,9 @@ if user_input:
             st.session_state.messages.append({"role": "assistant", "content": resposta_ia})
             with st.chat_message("assistant"):
                 st.write(resposta_ia)
+                
         except Exception as e:
-            st.error(f"Erro detalhado ao processar o chat: {e}")
+            st.error(f"🤖 ERRO DA IA: Não foi possível processar a mensagem (Erro 400/404). Detalhe: {e}")
 
 # ==========================================
 # SESSÃO DE UPLOAD DO PIX
