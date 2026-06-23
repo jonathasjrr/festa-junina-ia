@@ -44,7 +44,7 @@ ITENS_PADRAO = [
     "Pé de Moleque", "Doce de Amendoim", "Paçoca", "Cuscuz de Tapioca", "Caldo Verde",
     "Sopa de Ervilha", "Espetinho de Churrasco (30 u)", "Torta Salgada", "Curau",
     "Arroz Doce", "Pamonha", "Salgadinho (100u)", "Cachorro quente (Pão e Molho)", 
-    "Pamonha", "Milho cozido (25 u)", "Caldo de Kenga", "Salgadinho (100u)", 
+    "Milho cozido (25 u)", "Caldo de Kenga", "Salgadinho (100u)", 
     "Salgadinho (100u)", "Doce de Leite", "Salada de Fruta"
 ]
 
@@ -112,9 +112,10 @@ st.title("🤠 Assistente da nossa Festa Junina!")
 st.write("Olá! Eu ajudo a organizar nosso Arraiá. Pergunte-me o que falta trazer ou envie o comprovante do Pix!")
 
 st.sidebar.header("📍 Informações Importantes")
-st.sidebar.write("**Endereço:** Rua das Bandeirinhas, nº 123 - Bairro Centro")
-st.sidebar.write("**Horário:** Sábado, a partir das 18:00")
-st.sidebar.write("**Chave Pix para colaborar:** pix@nossofestejo.com")
+st.sidebar.write("**Endereço:** Rua Francisca Constantina, nº 137 - Bairro Porto Novo/SG")
+st.sidebar.write("**Data:** 18 de Julho de 2026")
+st.sidebar.write("**Horário:** Sábado, a partir das 19:00")
+st.sidebar.write("**Pensamos em alugar uma Sinuca e Totó, quer nos ajudar?** Chave pix: jonathasjrr@gmail.com")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📋 Lista Atualizada")
