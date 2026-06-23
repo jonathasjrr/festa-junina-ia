@@ -77,8 +77,8 @@ def formatar_cardapio_para_ia(df):
     return texto
 
 def get_gemini_model():
-    # Tenta usar o flash-latest. Se falhar, você pode trocar aqui para 'gemini-pro'
-    return genai.GenerativeModel('gemini-1.5-flash-latest')
+    # Trocando para o modelo clássico que é 100% compatível
+    return genai.GenerativeModel('gemini-pro')
 
 # ==========================================
 # INTERFACE VISUAL
@@ -167,7 +167,7 @@ if arquivo_foto:
     
     with st.spinner('Lendo o comprovante...'):
         try:
-            modelo_visao = get_gemini_model()
+            modelo_visao = genai.GenerativeModel('gemini-pro-vision')
             prompt_ocr = "Analise esta imagem. Isto é um comprovante de Pix válido? Se sim, leia o documento e me devolva APENAS o nome de quem pagou e o valor no formato: 'Nome da Pessoa - R$ Valor'. Se não for um comprovante Pix, diga apenas 'Inválido'."
             
             resultado = modelo_visao.generate_content([prompt_ocr, imagem]).text
