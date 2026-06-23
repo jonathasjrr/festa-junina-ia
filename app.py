@@ -40,7 +40,7 @@ MODELO_ATUAL = obter_modelo_seguro()
 # ==========================================
 # CONEXÃO DIRETA COM O GOOGLE SHEETS
 # ==========================================
-URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1ao4BKfUHK7C_jmuJUPwwXwhpy2e7IhVjdAId6QyAMrE/edit?usp=sharing"
+URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1ao4BKfUHK7C_jmuJUPwwXwhpy2e7IhVjdAId6QyAMrE/edit?gid=1055187794#gid=1055187794"
 conn_sheets = st.connection("gsheets", type=GSheetsConnection)
 
 def buscar_dados_planilha():
