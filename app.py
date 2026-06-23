@@ -2,7 +2,6 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import google.generativeai as genai
 from PIL import Image
-import requests
 import pandas as pd
 
 # ==========================================
@@ -29,24 +28,18 @@ def atualizar_reserva_planilha(item_nome, pessoa_nome):
     if df.empty:
         return False
     
-    # Usa as colunas exatas do seu arquivo CSV
     coluna_item = 'Nome_Item'
     coluna_responsavel = 'Quem_Vai_Trazer'
     
-    # Verifica se as colunas existem na planilha lida para evitar erros
     if coluna_item not in df.columns or coluna_responsavel not in df.columns:
         return False
 
-    # Converte para minúsculo para facilitar a busca
     df['Item_Lower'] = df[coluna_item].astype(str).str.lower().str.strip()
     item_procurado = item_nome.lower().strip()
     
     if item_procurado in df['Item_Lower'].values:
         idx = df[df['Item_Lower'] == item_procurado].index[0]
-        
-        # Atualiza o nome da pessoa na coluna correta
         df.at[idx, coluna_responsavel] = pessoa_nome
-        
         df = df.drop(columns=['Item_Lower'])
         conn_sheets.update(spreadsheet=URL_PLANILHA, data=df)
         return True
@@ -61,24 +54,18 @@ def formatar_cardapio_para_ia(df):
     coluna_responsavel = 'Quem_Vai_Trazer'
     
     for _, row in df.iterrows():
-        # Pula se não tiver o nome do item
         if pd.isna(row.get(coluna_item)):
             continue
             
         item = row[coluna_item]
         responsavel = row.get(coluna_responsavel, "em branco")
         
-        # Formata bonitinho para a IA entender o que está vago
         if pd.isna(responsavel) or str(responsavel).strip().lower() == "em branco" or str(responsavel).strip() == "":
             texto += f"- {item}: DISPONÍVEL\n"
         else:
             texto += f"- {item}: Já reservado por {responsavel}\n"
             
     return texto
-
-def get_gemini_model():
-    # Usando o modelo atualizado e ativo do Google
-    return genai.GenerativeModel('gemini-2.5-flash')
 
 # ==========================================
 # INTERFACE VISUAL
@@ -109,7 +96,8 @@ if user_input:
 
     with st.spinner("Espiando na planilha..."):
         try:
-            modelo_visao = genai.GenerativeModel('gemini-2.5-flash')
+            # === AQUI ESTÁ A VARIÁVEL QUE FALTAVA ===
+            modelo = genai.GenerativeModel('gemini-1.5-flash')
             
             df_atual = buscar_dados_planilha()
             dados_festa = formatar_cardapio_para_ia(df_atual)
@@ -152,7 +140,6 @@ if user_input:
                 st.write(resposta_ia)
         except Exception as e:
             st.error(f"Erro detalhado ao processar o chat: {e}")
-            st.info("DICA: Verifique se a sua biblioteca google-generativeai está atualizada ou altere o nome do modelo no código de 'gemini-1.5-flash-latest' para 'gemini-pro'.")
 
 # ==========================================
 # SESSÃO DE UPLOAD DO PIX
@@ -167,7 +154,7 @@ if arquivo_foto:
     
     with st.spinner('Lendo o comprovante...'):
         try:
-            modelo_visao = genai.GenerativeModel('gemini-pro-vision')
+            modelo_visao = genai.GenerativeModel('gemini-1.5-flash')
             prompt_ocr = "Analise esta imagem. Isto é um comprovante de Pix válido? Se sim, leia o documento e me devolva APENAS o nome de quem pagou e o valor no formato: 'Nome da Pessoa - R$ Valor'. Se não for um comprovante Pix, diga apenas 'Inválido'."
             
             resultado = modelo_visao.generate_content([prompt_ocr, imagem]).text
