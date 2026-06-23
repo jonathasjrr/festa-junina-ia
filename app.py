@@ -35,18 +35,18 @@ def obter_modelo_seguro():
 MODELO_ATUAL = obter_modelo_seguro()
 
 # ==========================================
-# BANCO DE DADOS INTERNO
+# BANCO DE DADOS INTERNO E LÓGICA DE SALVAMENTO
 # ==========================================
 ARQUIVO_DADOS = "dados_arraia.csv"
 
+# Lista exata baseada na sua planilha original
 ITENS_PADRAO = [
     "Quentão", "Salsichão (30 u)", "Bolo de Cenoura", "Bolo de Aipim", "Cocada",
     "Pé de Moleque", "Doce de Amendoim", "Paçoca", "Cuscuz de Tapioca", "Caldo Verde",
     "Sopa de Ervilha", "Espetinho de Churrasco (30 u)", "Torta Salgada", "Curau",
-    "Arroz Doce", "Pamonha - Opção 1", "Pamonha - Opção 2", "Cachorro quente (Pão e Molho)", 
-    "Milho cozido (25 u)", "Caldo de Kenga", "Salgadinho (100u) - Bandeja 1", 
-    "Salgadinho (100u) - Bandeja 2", "Salgadinho (100u) - Bandeja 3", "Doce de Leite", 
-    "Salada de Fruta"
+    "Arroz Doce", "Pamonha", "Salgadinho (100u)", "Cachorro quente (Pão e Molho)", 
+    "Pamonha", "Milho cozido (25 u)", "Caldo de Kenga", "Salgadinho (100u)", 
+    "Salgadinho (100u)", "Doce de Leite", "Salada de Fruta"
 ]
 
 def enviar_aviso_telegram(mensagem):
@@ -70,19 +70,27 @@ def carregar_dados():
 
 def atualizar_reserva_local(item_nome, pessoa_nome):
     df = carregar_dados()
-    df['Item_Lower'] = df['Nome_Item'].astype(str).str.lower().str.strip()
-    item_procurado = item_nome.lower().strip()
     
-    match = df[df['Item_Lower'].str.contains(item_procurado, na=False)]
+    # Limpa formatações Markdown que a IA possa inventar
+    item_nome_limpo = item_nome.replace("*", "").replace("_", "").strip().lower()
+    df['Item_Lower'] = df['Nome_Item'].astype(str).str.lower().str.strip()
+    
+    # FILTRO: Olha apenas para os itens que ainda estão "em branco"
+    df_disponiveis = df[df['Quem_Vai_Trazer'].astype(str).str.strip().str.lower().isin(['em branco', '', 'nan'])]
+    
+    # regex=False garante que itens com parênteses (30 u) sejam encontrados
+    match = df_disponiveis[df_disponiveis['Item_Lower'].str.contains(item_nome_limpo, na=False, regex=False)]
     
     if not match.empty:
-        idx = match.index[0]
+        idx = match.index[0] # Pega estritamente a primeira linha vazia que deu match
         item_real = df.at[idx, 'Nome_Item']
         df.at[idx, 'Quem_Vai_Trazer'] = pessoa_nome
+        
+        # Salva o arquivo sem a coluna temporária
         df = df.drop(columns=['Item_Lower'])
         df.to_csv(ARQUIVO_DADOS, index=False) 
         
-        enviar_aviso_telegram(f"🌽 *NOVA RESERVA DO ARRAIÁ!*\nO(a) {pessoa_nome} acabou de reservar: *{item_real}*")
+        enviar_aviso_telegram(f"🌽 *NOVA RESERVA DO ARRAIÁ!*\nO(a) {pessoa_nome} reservou: *{item_real}*")
         return True
     return False
 
@@ -130,7 +138,7 @@ if user_input:
     with st.chat_message("user"):
         st.write(user_input)
 
-    with st.spinner("Anotando no caderninho e falando com a IA..."):
+    with st.spinner("Anotando no banco de dados e falando com a IA..."):
         try:
             dados_festa = formatar_cardapio_para_ia()
             modelo = genai.GenerativeModel(MODELO_ATUAL)
@@ -153,35 +161,36 @@ if user_input:
             prompt_completo_seguro = f"{prompt_sistema}\n\n[MENSAGEM DO USUÁRIO]: {user_input}"
             resposta_ia = modelo.generate_content(prompt_completo_seguro).text
             
-            # --- NOVO FLUXO COM ATUALIZAÇÃO FORÇADA DE TELA ---
             precisa_recarregar = False
             
             if "[RESERVA:" in resposta_ia:
                 try:
-                    texto_dentro_colchetes = resposta_ia.split("[RESERVA:")[1].split("]")[0]
-                    partes = texto_dentro_colchetes.split("|")
-                    item_reserva = partes[0].strip()
-                    nome_reserva = partes[1].strip()
-                    
-                    sucesso = atualizar_reserva_local(item_reserva, nome_reserva)
-                    resposta_ia = re.sub(r'\[RESERVA:.*?\]', '', resposta_ia).strip()
-                    
-                    if sucesso:
-                        resposta_ia += f"\n\n✨ 🎉 Eita coisa boa! Já escrevi aqui na nossa lista oficial que o(a) {nome_reserva} vai trazer {item_reserva}! Muito obrigado pela ajuda, sô!"
-                        precisa_recarregar = True # Liga o alerta de atualização de tela
-                    else:
-                        resposta_ia += f"\n\nOpa, procurei aqui na lista e não achei o prato '{item_reserva}' livre. Cê escreveu igualzinho tá na lista?"
+                    # Isola a tag usando Regex de forma robusta
+                    match_tag = re.search(r'\[RESERVA:(.*?)\]', resposta_ia)
+                    if match_tag:
+                        texto_dentro_colchetes = match_tag.group(1)
+                        partes = texto_dentro_colchetes.split("|")
+                        item_reserva = partes[0].replace("*", "").strip()
+                        nome_reserva = partes[1].replace("*", "").strip()
+                        
+                        sucesso = atualizar_reserva_local(item_reserva, nome_reserva)
+                        
+                        # Limpa a tag da resposta que será impressa na tela
+                        resposta_ia = re.sub(r'\[RESERVA:.*?\]', '', resposta_ia).strip()
+                        
+                        if sucesso:
+                            resposta_ia += f"\n\n✨ 🎉 Eita coisa boa! Já escrevi aqui na nossa lista oficial que o(a) {nome_reserva} vai trazer {item_reserva}! Muito obrigado pela ajuda, sô!"
+                            precisa_recarregar = True 
+                        else:
+                            resposta_ia += f"\n\nOpa, procurei aqui na lista e não achei o prato '{item_reserva}' livre ou válido. Cê escreveu igualzinho tá na lista?"
                 except Exception as erro_reserva:
                     st.error(f"❌ Erro ao gravar internamente: {erro_reserva}")
             
-            # Salva no histórico de mensagens PRIMEIRO
             st.session_state.messages.append({"role": "assistant", "content": resposta_ia})
             
-            # Se a reserva funcionou, aplica o "F5" no sistema
             if precisa_recarregar:
                 st.rerun()
             else:
-                # Se não houve reserva, apenas mostra a mensagem
                 with st.chat_message("assistant"):
                     st.write(resposta_ia)
                 
