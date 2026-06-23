@@ -39,7 +39,6 @@ MODELO_ATUAL = obter_modelo_seguro()
 # ==========================================
 ARQUIVO_DADOS = "dados_arraia.csv"
 
-# Lista exata baseada na sua planilha original
 ITENS_PADRAO = [
     "Quentão", "Salsichão (30 u)", "Bolo de Cenoura", "Bolo de Aipim", "Cocada",
     "Pé de Moleque", "Doce de Amendoim", "Paçoca", "Cuscuz de Tapioca", "Caldo Verde",
@@ -56,7 +55,7 @@ def enviar_aviso_telegram(mensagem):
             chat_id = st.secrets["TELEGRAM_CHAT_ID"]
             requests.post(
                 f"https://api.telegram.org/bot{token}/sendMessage", 
-                data={"chat_id": chat_id, "text": mensagem, "parse_mode": "Markdown"}
+                data={"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
             )
         except Exception:
             pass
@@ -71,22 +70,19 @@ def carregar_dados():
 def atualizar_reserva_local(item_nome, pessoa_nome):
     df = carregar_dados()
     
-    # Limpa formatações Markdown que a IA possa inventar
     item_nome_limpo = item_nome.replace("*", "").replace("_", "").strip().lower()
     df['Item_Lower'] = df['Nome_Item'].astype(str).str.lower().str.strip()
     
-    # FILTRO: Olha apenas para os itens que ainda estão "em branco"
+    # Filtra apenas linhas que ainda estão em branco
     df_disponiveis = df[df['Quem_Vai_Trazer'].astype(str).str.strip().str.lower().isin(['em branco', '', 'nan'])]
     
-    # regex=False garante que itens com parênteses (30 u) sejam encontrados
     match = df_disponiveis[df_disponiveis['Item_Lower'].str.contains(item_nome_limpo, na=False, regex=False)]
     
     if not match.empty:
-        idx = match.index[0] # Pega estritamente a primeira linha vazia que deu match
+        idx = match.index[0] 
         item_real = df.at[idx, 'Nome_Item']
         df.at[idx, 'Quem_Vai_Trazer'] = pessoa_nome
         
-        # Salva o arquivo sem a coluna temporária
         df = df.drop(columns=['Item_Lower'])
         df.to_csv(ARQUIVO_DADOS, index=False) 
         
@@ -138,10 +134,16 @@ if user_input:
     with st.chat_message("user"):
         st.write(user_input)
 
-    with st.spinner("Anotando no banco de dados e falando com a IA..."):
+    with st.spinner("Processando histórico e falando com a IA..."):
         try:
             dados_festa = formatar_cardapio_para_ia()
             modelo = genai.GenerativeModel(MODELO_ATUAL)
+            
+            # --- CONSTRUÇÃO DO HISTÓRICO DE CONVERSA COMPLETO ---
+            historico_conversa = ""
+            for msg in st.session_state.messages:
+                papel = "Usuário" if msg["role"] == "user" else "Organizador (Você)"
+                historico_conversa += f"{papel}: {msg['content']}\n"
             
             prompt_sistema = f"""
             Você é um organizador de festa junina muito simpático, caipira, prestativo e paciente.
@@ -154,18 +156,20 @@ if user_input:
             REGRAS OBRIGATÓRIAS DE COMPORTAMENTO:
             1. Use bastante o sotaque caipira e emojis caipiras (🌽🤠🔥).
             2. Se o usuário perguntar o que está faltando, liste TODOS os itens marcados como DISPONÍVEL. NÃO RESUMA e NÃO INVENTE itens.
-            3. Se o usuário quiser trazer um item que está DISPONÍVEL e já disser o nome dele, responda iniciando sua mensagem EXATAMENTE com a tag estruturada [RESERVA: NomeDoItem | NomeDaPessoa]. 
-            4. CASO O USUÁRIO NÃO SE IDENTIFIQUE, NÃO use a tag de reserva. Peça o nome dele de maneira muito educada e com sotaque caipira antes de poder confirmar.
+            3. Se no histórico de conversa abaixo o usuário demonstrar intenção de trazer um item disponível E você já souber (ou ele acabar de fornecer) o nome dele, você deve responder iniciando sua mensagem EXATAMENTE com a tag estruturada [RESERVA: NomeDoItem | NomeDaPessoa].
+            4. CASO O USUÁRIO NÃO SE IDENTIFIQUE AINDA: Não use a tag de reserva. Peça o nome dele de maneira muito educada e com sotaque caipira antes de poder confirmar.
+            
+            [HISTÓRICO DA CONVERSA COMPLETA]:
+            {historico_conversa}
+            
+            Analise o histórico acima completo para responder à última linha mantendo o contexto.
             """
             
-            prompt_completo_seguro = f"{prompt_sistema}\n\n[MENSAGEM DO USUÁRIO]: {user_input}"
-            resposta_ia = modelo.generate_content(prompt_completo_seguro).text
-            
+            resposta_ia = modelo.generate_content(prompt_sistema).text
             precisa_recarregar = False
             
             if "[RESERVA:" in resposta_ia:
                 try:
-                    # Isola a tag usando Regex de forma robusta
                     match_tag = re.search(r'\[RESERVA:(.*?)\]', resposta_ia)
                     if match_tag:
                         texto_dentro_colchetes = match_tag.group(1)
@@ -174,8 +178,6 @@ if user_input:
                         nome_reserva = partes[1].replace("*", "").strip()
                         
                         sucesso = atualizar_reserva_local(item_reserva, nome_reserva)
-                        
-                        # Limpa a tag da resposta que será impressa na tela
                         resposta_ia = re.sub(r'\[RESERVA:.*?\]', '', resposta_ia).strip()
                         
                         if sucesso:
