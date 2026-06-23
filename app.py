@@ -35,11 +35,10 @@ def obter_modelo_seguro():
 MODELO_ATUAL = obter_modelo_seguro()
 
 # ==========================================
-# BANCO DE DADOS INTERNO (Substitui o Sheets)
+# BANCO DE DADOS INTERNO
 # ==========================================
 ARQUIVO_DADOS = "dados_arraia.csv"
 
-# Lista original da sua planilha já embutida no código
 ITENS_PADRAO = [
     "Quentão", "Salsichão (30 u)", "Bolo de Cenoura", "Bolo de Aipim", "Cocada",
     "Pé de Moleque", "Doce de Amendoim", "Paçoca", "Cuscuz de Tapioca", "Caldo Verde",
@@ -51,7 +50,6 @@ ITENS_PADRAO = [
 ]
 
 def enviar_aviso_telegram(mensagem):
-    """Envia um alerta para o celular do Jonathas para garantir o backup da reserva"""
     if "TELEGRAM_TOKEN" in st.secrets and "TELEGRAM_CHAT_ID" in st.secrets:
         try:
             token = st.secrets["TELEGRAM_TOKEN"]
@@ -64,7 +62,6 @@ def enviar_aviso_telegram(mensagem):
             pass
 
 def carregar_dados():
-    """Carrega os dados do arquivo local. Se não existir, cria com a lista padrão."""
     if not os.path.exists(ARQUIVO_DADOS):
         df = pd.DataFrame({"Nome_Item": ITENS_PADRAO, "Quem_Vai_Trazer": ["em branco"] * len(ITENS_PADRAO)})
         df.to_csv(ARQUIVO_DADOS, index=False)
@@ -76,7 +73,6 @@ def atualizar_reserva_local(item_nome, pessoa_nome):
     df['Item_Lower'] = df['Nome_Item'].astype(str).str.lower().str.strip()
     item_procurado = item_nome.lower().strip()
     
-    # Procura um item que seja bem parecido com o que a pessoa digitou
     match = df[df['Item_Lower'].str.contains(item_procurado, na=False)]
     
     if not match.empty:
@@ -84,9 +80,8 @@ def atualizar_reserva_local(item_nome, pessoa_nome):
         item_real = df.at[idx, 'Nome_Item']
         df.at[idx, 'Quem_Vai_Trazer'] = pessoa_nome
         df = df.drop(columns=['Item_Lower'])
-        df.to_csv(ARQUIVO_DADOS, index=False) # Salva as alterações
+        df.to_csv(ARQUIVO_DADOS, index=False) 
         
-        # Manda o alerta pro Telegram!
         enviar_aviso_telegram(f"🌽 *NOVA RESERVA DO ARRAIÁ!*\nO(a) {pessoa_nome} acabou de reservar: *{item_real}*")
         return True
     return False
@@ -117,7 +112,6 @@ st.sidebar.write("**Endereço:** Rua das Bandeirinhas, nº 123 - Bairro Centro")
 st.sidebar.write("**Horário:** Sábado, a partir das 18:00")
 st.sidebar.write("**Chave Pix para colaborar:** pix@nossofestejo.com")
 
-# Tabela para você conseguir ver em tempo real quem vai levar o que na aba lateral
 st.sidebar.markdown("---")
 st.sidebar.subheader("📋 Lista Atualizada")
 st.sidebar.dataframe(carregar_dados(), hide_index=True)
@@ -159,6 +153,9 @@ if user_input:
             prompt_completo_seguro = f"{prompt_sistema}\n\n[MENSAGEM DO USUÁRIO]: {user_input}"
             resposta_ia = modelo.generate_content(prompt_completo_seguro).text
             
+            # --- NOVO FLUXO COM ATUALIZAÇÃO FORÇADA DE TELA ---
+            precisa_recarregar = False
+            
             if "[RESERVA:" in resposta_ia:
                 try:
                     texto_dentro_colchetes = resposta_ia.split("[RESERVA:")[1].split("]")[0]
@@ -171,15 +168,22 @@ if user_input:
                     
                     if sucesso:
                         resposta_ia += f"\n\n✨ 🎉 Eita coisa boa! Já escrevi aqui na nossa lista oficial que o(a) {nome_reserva} vai trazer {item_reserva}! Muito obrigado pela ajuda, sô!"
-                        st.cache_data.clear() # Atualiza a tabela na barra lateral
+                        precisa_recarregar = True # Liga o alerta de atualização de tela
                     else:
                         resposta_ia += f"\n\nOpa, procurei aqui na lista e não achei o prato '{item_reserva}' livre. Cê escreveu igualzinho tá na lista?"
                 except Exception as erro_reserva:
                     st.error(f"❌ Erro ao gravar internamente: {erro_reserva}")
             
+            # Salva no histórico de mensagens PRIMEIRO
             st.session_state.messages.append({"role": "assistant", "content": resposta_ia})
-            with st.chat_message("assistant"):
-                st.write(resposta_ia)
+            
+            # Se a reserva funcionou, aplica o "F5" no sistema
+            if precisa_recarregar:
+                st.rerun()
+            else:
+                # Se não houve reserva, apenas mostra a mensagem
+                with st.chat_message("assistant"):
+                    st.write(resposta_ia)
                 
         except Exception as e:
             st.error(f"🤖 ERRO DA IA: Não foi possível processar a mensagem. Detalhe: {e}")
