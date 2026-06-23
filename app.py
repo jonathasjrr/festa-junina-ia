@@ -3,6 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import google.generativeai as genai
 from PIL import Image
 import pandas as pd
+import re
 
 # ==========================================
 # CONFIGURAÇÃO DE SEGURANÇA
@@ -40,11 +41,12 @@ MODELO_ATUAL = obter_modelo_seguro()
 # ==========================================
 # CONEXÃO DIRETA COM O GOOGLE SHEETS
 # ==========================================
+# COLE O SEU LINK COM O #GID AQUI:
 URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1ao4BKfUHK7C_jmuJUPwwXwhpy2e7IhVjdAId6QyAMrE/edit?gid=1055187794#gid=1055187794"
+
 conn_sheets = st.connection("gsheets", type=GSheetsConnection)
 
 def buscar_dados_planilha():
-    # Removido o parâmetro worksheet="Itens". Ele lerá a primeira aba por padrão!
     df = conn_sheets.read(spreadsheet=URL_PLANILHA, ttl=5)
     return df
 
@@ -66,8 +68,12 @@ def atualizar_reserva_planilha(item_nome, pessoa_nome):
         idx = df[df['Item_Lower'] == item_procurado].index[0]
         df.at[idx, coluna_responsavel] = pessoa_nome
         df = df.drop(columns=['Item_Lower'])
-        # Removido daqui também para não dar erro na gravação
-        conn_sheets.update(spreadsheet=URL_PLANILHA, data=df)
+        
+        # CORREÇÃO AQUI: Comando correto para gravar os dados sem causar conflito
+        conn_sheets.update(data=df)
+        
+        # Limpa a memória temporária do Streamlit para ele ler a planilha nova imediatamente
+        st.cache_data.clear() 
         return True
     return False
 
@@ -120,7 +126,7 @@ if user_input:
     with st.chat_message("user"):
         st.write(user_input)
 
-    with st.spinner("Espiando na planilha e chamando a IA..."):
+    with st.spinner("Anotando no caderninho e falando com a IA..."):
         try:
             df_atual = buscar_dados_planilha()
             dados_festa = formatar_cardapio_para_ia(df_atual)
@@ -151,21 +157,28 @@ if user_input:
             
             resposta_ia = modelo.generate_content(prompt_completo_seguro).text
             
+            # Lógica corrigida para lidar com a reserva e APAGAR a tag da tela
             if "[RESERVA:" in resposta_ia:
                 try:
-                    partes = resposta_ia.split("[RESERVA:")[1].split("]")[0].split("|")
+                    # Extrai os nomes
+                    texto_dentro_colchetes = resposta_ia.split("[RESERVA:")[1].split("]")[0]
+                    partes = texto_dentro_colchetes.split("|")
                     item_reserva = partes[0].strip()
                     nome_reserva = partes[1].strip()
                     
+                    # Tenta salvar na planilha
                     sucesso = atualizar_reserva_planilha(item_reserva, nome_reserva)
                     
-                    resposta_ia = resposta_ia.split("[RESERVA:")[0]
+                    # Limpa a tag feia da resposta (substitui por vazio)
+                    resposta_ia = re.sub(r'\[RESERVA:.*?\]', '', resposta_ia).strip()
+                    
                     if sucesso:
                         resposta_ia += f"\n\n✨ 🎉 Eita coisa boa! Já escrevi aqui na nossa planilha oficial que o(a) {nome_reserva} vai trazer {item_reserva}! Muito obrigado pela ajuda, sô!"
                     else:
-                        resposta_ia += f"\n\nOpa, olhei aqui na planilha e não encontrei o prato '{item_reserva}' na nossa lista oficial. Pode conferir se o nome está certinho?"
+                        resposta_ia += f"\n\nOpa, olhei aqui na planilha e não encontrei o prato '{item_reserva}' na nossa lista oficial. Cê escreveu igualzinho tá na lista?"
                 except Exception as erro_reserva:
-                    pass
+                    # SE DER ERRO NO SALVAMENTO, ELE VAI AVISAR AQUI:
+                    st.error(f"❌ Erro crítico ao tentar gravar na planilha do Google: {erro_reserva}")
             
             st.session_state.messages.append({"role": "assistant", "content": resposta_ia})
             with st.chat_message("assistant"):
