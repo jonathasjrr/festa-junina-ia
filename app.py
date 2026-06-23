@@ -1,8 +1,9 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import google.generativeai as genai
 from PIL import Image
 import pandas as pd
+import requests
+import os
 import re
 
 # ==========================================
@@ -22,81 +23,85 @@ def obter_modelo_seguro():
         modelos_disponiveis = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                nome_limpo = m.name.replace('models/', '')
-                modelos_disponiveis.append(nome_limpo)
-        
+                modelos_disponiveis.append(m.name.replace('models/', ''))
         for modelo in modelos_disponiveis:
             if 'flash' in modelo.lower():
                 return modelo
-                
-        if modelos_disponiveis:
-            return modelos_disponiveis[0]
-            
+        if modelos_disponiveis: return modelos_disponiveis[0]
         return 'gemini-1.5-flash'
-    except Exception as e:
+    except Exception:
         return 'gemini-1.5-flash'
 
 MODELO_ATUAL = obter_modelo_seguro()
 
 # ==========================================
-# CONEXÃO DIRETA COM O GOOGLE SHEETS
+# BANCO DE DADOS INTERNO (Substitui o Sheets)
 # ==========================================
-# COLE O SEU LINK COM O #GID AQUI:
-URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1ao4BKfUHK7C_jmuJUPwwXwhpy2e7IhVjdAId6QyAMrE/edit?gid=1055187794#gid=1055187794"
+ARQUIVO_DADOS = "dados_arraia.csv"
 
-conn_sheets = st.connection("gsheets", type=GSheetsConnection)
+# Lista original da sua planilha já embutida no código
+ITENS_PADRAO = [
+    "Quentão", "Salsichão (30 u)", "Bolo de Cenoura", "Bolo de Aipim", "Cocada",
+    "Pé de Moleque", "Doce de Amendoim", "Paçoca", "Cuscuz de Tapioca", "Caldo Verde",
+    "Sopa de Ervilha", "Espetinho de Churrasco (30 u)", "Torta Salgada", "Curau",
+    "Arroz Doce", "Pamonha - Opção 1", "Pamonha - Opção 2", "Cachorro quente (Pão e Molho)", 
+    "Milho cozido (25 u)", "Caldo de Kenga", "Salgadinho (100u) - Bandeja 1", 
+    "Salgadinho (100u) - Bandeja 2", "Salgadinho (100u) - Bandeja 3", "Doce de Leite", 
+    "Salada de Fruta"
+]
 
-def buscar_dados_planilha():
-    df = conn_sheets.read(spreadsheet=URL_PLANILHA, ttl=5)
-    return df
+def enviar_aviso_telegram(mensagem):
+    """Envia um alerta para o celular do Jonathas para garantir o backup da reserva"""
+    if "TELEGRAM_TOKEN" in st.secrets and "TELEGRAM_CHAT_ID" in st.secrets:
+        try:
+            token = st.secrets["TELEGRAM_TOKEN"]
+            chat_id = st.secrets["TELEGRAM_CHAT_ID"]
+            requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage", 
+                data={"chat_id": chat_id, "text": mensagem, "parse_mode": "Markdown"}
+            )
+        except Exception:
+            pass
 
-def atualizar_reserva_planilha(item_nome, pessoa_nome):
-    df = buscar_dados_planilha()
-    if df.empty:
-        return False
-    
-    coluna_item = 'Nome_Item'
-    coluna_responsavel = 'Quem_Vai_Trazer'
-    
-    if coluna_item not in df.columns or coluna_responsavel not in df.columns:
-        return False
+def carregar_dados():
+    """Carrega os dados do arquivo local. Se não existir, cria com a lista padrão."""
+    if not os.path.exists(ARQUIVO_DADOS):
+        df = pd.DataFrame({"Nome_Item": ITENS_PADRAO, "Quem_Vai_Trazer": ["em branco"] * len(ITENS_PADRAO)})
+        df.to_csv(ARQUIVO_DADOS, index=False)
+        return df
+    return pd.read_csv(ARQUIVO_DADOS)
 
-    df['Item_Lower'] = df[coluna_item].astype(str).str.lower().str.strip()
+def atualizar_reserva_local(item_nome, pessoa_nome):
+    df = carregar_dados()
+    df['Item_Lower'] = df['Nome_Item'].astype(str).str.lower().str.strip()
     item_procurado = item_nome.lower().strip()
     
-    if item_procurado in df['Item_Lower'].values:
-        idx = df[df['Item_Lower'] == item_procurado].index[0]
-        df.at[idx, coluna_responsavel] = pessoa_nome
+    # Procura um item que seja bem parecido com o que a pessoa digitou
+    match = df[df['Item_Lower'].str.contains(item_procurado, na=False)]
+    
+    if not match.empty:
+        idx = match.index[0]
+        item_real = df.at[idx, 'Nome_Item']
+        df.at[idx, 'Quem_Vai_Trazer'] = pessoa_nome
         df = df.drop(columns=['Item_Lower'])
+        df.to_csv(ARQUIVO_DADOS, index=False) # Salva as alterações
         
-        # CORREÇÃO AQUI: Comando correto para gravar os dados sem causar conflito
-        conn_sheets.update(data=df)
-        
-        # Limpa a memória temporária do Streamlit para ele ler a planilha nova imediatamente
-        st.cache_data.clear() 
+        # Manda o alerta pro Telegram!
+        enviar_aviso_telegram(f"🌽 *NOVA RESERVA DO ARRAIÁ!*\nO(a) {pessoa_nome} acabou de reservar: *{item_real}*")
         return True
     return False
 
-def formatar_cardapio_para_ia(df):
-    if df.empty:
-        return "A planilha está vazia no momento."
-        
-    texto = "Lista atual de itens na nossa planilha:\n"
-    coluna_item = 'Nome_Item'
-    coluna_responsavel = 'Quem_Vai_Trazer'
-    
+def formatar_cardapio_para_ia():
+    df = carregar_dados()
+    texto = "Lista atual da nossa festa:\n"
     for _, row in df.iterrows():
-        if pd.isna(row.get(coluna_item)):
-            continue
-            
-        item = row[coluna_item]
-        responsavel = row.get(coluna_responsavel, "em branco")
+        item = row['Nome_Item']
+        responsavel = str(row['Quem_Vai_Trazer'])
         
-        if pd.isna(responsavel) or str(responsavel).strip().lower() in ["em branco", ""]:
+        if pd.isna(responsavel) or responsavel.strip().lower() in ["em branco", ""]:
             texto += f"- {item}: DISPONÍVEL\n"
         else:
             texto += f"- {item}: Já reservado por {responsavel}\n"
-            
     return texto
 
 # ==========================================
@@ -112,8 +117,13 @@ st.sidebar.write("**Endereço:** Rua das Bandeirinhas, nº 123 - Bairro Centro")
 st.sidebar.write("**Horário:** Sábado, a partir das 18:00")
 st.sidebar.write("**Chave Pix para colaborar:** pix@nossofestejo.com")
 
+# Tabela para você conseguir ver em tempo real quem vai levar o que na aba lateral
+st.sidebar.markdown("---")
+st.sidebar.subheader("📋 Lista Atualizada")
+st.sidebar.dataframe(carregar_dados(), hide_index=True)
+
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Ô de casa! Bão demais da conta? Pergunte-me o que já tem de comida na nossa planilha, o que ainda tá faltando ou me diga o seu nome e o que deseja trazer pra nossa festança!"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Ô de casa! Bão demais da conta? Pergunte-me o que já tem de comida na nossa listinha, o que ainda tá faltando ou me diga o seu nome e o que deseja trazer pra nossa festança!"}]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -128,57 +138,44 @@ if user_input:
 
     with st.spinner("Anotando no caderninho e falando com a IA..."):
         try:
-            df_atual = buscar_dados_planilha()
-            dados_festa = formatar_cardapio_para_ia(df_atual)
-        except Exception as e:
-            st.error(f"❌ ERRO DE PLANILHA: Detalhe: {e}")
-            st.stop()
-
-        try:
+            dados_festa = formatar_cardapio_para_ia()
             modelo = genai.GenerativeModel(MODELO_ATUAL)
             
             prompt_sistema = f"""
             Você é um organizador de festa junina muito simpático, caipira, prestativo e paciente.
             O endereço da festa é: Rua das Bandeirinhas, nº 123 - Bairro Centro.
             O horário é: Sábado às 18:00.
-            A chave pix é: pix@nossofestejo.com.
             
-            Aqui estão os dados REAIS e EXATOS vindos diretamente da nossa planilha:
+            Aqui estão os dados REAIS e EXATOS vindos diretamente da nossa lista atualizada:
             {dados_festa}
             
             REGRAS OBRIGATÓRIAS DE COMPORTAMENTO:
             1. Use bastante o sotaque caipira e emojis caipiras (🌽🤠🔥).
-            2. Se o usuário perguntar o que está faltando ou o que tem na lista, você deve listar TODOS os itens marcados como DISPONÍVEL que estão nos dados acima. É EXPRESSAMENTE PROIBIDO resumir, ocultar itens ou inventar opções que não estão nessa lista.
-            3. Se o usuário disser que quer trazer um item que está marcado como DISPONÍVEL e disser o seu próprio nome, responda iniciando sua mensagem EXATAMENTE com a tag estruturada [RESERVA: NomeDoItem | NomeDaPessoa]. 
-            4. CASO O USUÁRIO NÃO SE IDENTIFIQUE: Não use a tag de reserva! Peça o nome dele de maneira muito educada, divertida e carinhosa com sotaque caipira antes de poder confirmar.
+            2. Se o usuário perguntar o que está faltando, liste TODOS os itens marcados como DISPONÍVEL. NÃO RESUMA e NÃO INVENTE itens.
+            3. Se o usuário quiser trazer um item que está DISPONÍVEL e já disser o nome dele, responda iniciando sua mensagem EXATAMENTE com a tag estruturada [RESERVA: NomeDoItem | NomeDaPessoa]. 
+            4. CASO O USUÁRIO NÃO SE IDENTIFIQUE, NÃO use a tag de reserva. Peça o nome dele de maneira muito educada e com sotaque caipira antes de poder confirmar.
             """
             
             prompt_completo_seguro = f"{prompt_sistema}\n\n[MENSAGEM DO USUÁRIO]: {user_input}"
-            
             resposta_ia = modelo.generate_content(prompt_completo_seguro).text
             
-            # Lógica corrigida para lidar com a reserva e APAGAR a tag da tela
             if "[RESERVA:" in resposta_ia:
                 try:
-                    # Extrai os nomes
                     texto_dentro_colchetes = resposta_ia.split("[RESERVA:")[1].split("]")[0]
                     partes = texto_dentro_colchetes.split("|")
                     item_reserva = partes[0].strip()
                     nome_reserva = partes[1].strip()
                     
-                    # Tenta salvar na planilha
-                    sucesso = atualizar_reserva_planilha(item_reserva, nome_reserva)
-                    
-                    # Limpa a tag feia da resposta (substitui por vazio)
+                    sucesso = atualizar_reserva_local(item_reserva, nome_reserva)
                     resposta_ia = re.sub(r'\[RESERVA:.*?\]', '', resposta_ia).strip()
                     
                     if sucesso:
-                        resposta_ia += f"\n\n✨ 🎉 Eita coisa boa! Já escrevi aqui na nossa planilha oficial que o(a) {nome_reserva} vai trazer {item_reserva}! Muito obrigado pela ajuda, sô!"
+                        resposta_ia += f"\n\n✨ 🎉 Eita coisa boa! Já escrevi aqui na nossa lista oficial que o(a) {nome_reserva} vai trazer {item_reserva}! Muito obrigado pela ajuda, sô!"
+                        st.cache_data.clear() # Atualiza a tabela na barra lateral
                     else:
-                        resposta_ia += f"\n\nOpa, olhei aqui na planilha e não encontrei o prato '{item_reserva}' na nossa lista oficial. Cê escreveu igualzinho tá na lista?"
+                        resposta_ia += f"\n\nOpa, procurei aqui na lista e não achei o prato '{item_reserva}' livre. Cê escreveu igualzinho tá na lista?"
                 except Exception as erro_reserva:
-                    # SE DER ERRO NO SALVAMENTO, ELE VAI AVISAR AQUI:
-                    st.error(f"❌ Erro crítico ao tentar gravar na planilha do Google: {erro_reserva}")
+                    st.error(f"❌ Erro ao gravar internamente: {erro_reserva}")
             
             st.session_state.messages.append({"role": "assistant", "content": resposta_ia})
             with st.chat_message("assistant"):
@@ -207,7 +204,8 @@ if arquivo_foto:
             
             if "Inválido" not in resultado:
                 st.success(f"Obrigado! Comprovante recebido: {resultado}")
+                enviar_aviso_telegram(f"🔔 *PIX JUNINO RECEBIDO!*\n{resultado}")
             else:
-                st.error("Não consegui identificar este arquivo como um comprovante de Pix. Pode enviar novamente?")
+                st.error("Não consegui identificar este arquivo como um comprovante de Pix.")
         except Exception as e:
             st.error(f"Erro ao processar o comprovante: {e}")
