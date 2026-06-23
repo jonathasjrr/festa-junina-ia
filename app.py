@@ -44,8 +44,8 @@ URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1ao4BKfUHK7C_jmuJUPwwXwhp
 conn_sheets = st.connection("gsheets", type=GSheetsConnection)
 
 def buscar_dados_planilha():
-    # IMPORTANTE: A sua aba no Google Sheets DEVE se chamar "Itens"
-    df = conn_sheets.read(spreadsheet=URL_PLANILHA, worksheet="Itens", ttl=5)
+    # Removido o parâmetro worksheet="Itens". Ele lerá a primeira aba por padrão!
+    df = conn_sheets.read(spreadsheet=URL_PLANILHA, ttl=5)
     return df
 
 def atualizar_reserva_planilha(item_nome, pessoa_nome):
@@ -66,7 +66,8 @@ def atualizar_reserva_planilha(item_nome, pessoa_nome):
         idx = df[df['Item_Lower'] == item_procurado].index[0]
         df.at[idx, coluna_responsavel] = pessoa_nome
         df = df.drop(columns=['Item_Lower'])
-        conn_sheets.update(spreadsheet=URL_PLANILHA, worksheet="Itens", data=df)
+        # Removido daqui também para não dar erro na gravação
+        conn_sheets.update(spreadsheet=URL_PLANILHA, data=df)
         return True
     return False
 
@@ -120,15 +121,13 @@ if user_input:
         st.write(user_input)
 
     with st.spinner("Espiando na planilha e chamando a IA..."):
-        # PASSO 1: Tenta ler a planilha de forma isolada
         try:
             df_atual = buscar_dados_planilha()
             dados_festa = formatar_cardapio_para_ia(df_atual)
         except Exception as e:
-            st.error(f"❌ ERRO DE PLANILHA: Verifique se o nome da aba lá embaixo no Google Sheets é exatamente 'Itens'. Detalhe: {e}")
-            st.stop() # Para a execução aqui para não dar erro na IA
+            st.error(f"❌ ERRO DE PLANILHA: Detalhe: {e}")
+            st.stop()
 
-        # PASSO 2: Tenta enviar a mensagem para a IA usando formato seguro (Texto Único)
         try:
             modelo = genai.GenerativeModel(MODELO_ATUAL)
             
@@ -143,12 +142,11 @@ if user_input:
             
             REGRAS OBRIGATÓRIAS DE COMPORTAMENTO:
             1. Use bastante o sotaque caipira e emojis caipiras (🌽🤠🔥).
-            2. Se o usuário perguntar o que está faltando ou o que tem na lista, você deve listar TODOS os itens marcados como DISPONÍVEL que estão nos dados acima. É EXPRESSAMENTE PROIBIDO resumir, ocultar itens ou inventar opções.
+            2. Se o usuário perguntar o que está faltando ou o que tem na lista, você deve listar TODOS os itens marcados como DISPONÍVEL que estão nos dados acima. É EXPRESSAMENTE PROIBIDO resumir, ocultar itens ou inventar opções que não estão nessa lista.
             3. Se o usuário disser que quer trazer um item que está marcado como DISPONÍVEL e disser o seu próprio nome, responda iniciando sua mensagem EXATAMENTE com a tag estruturada [RESERVA: NomeDoItem | NomeDaPessoa]. 
             4. CASO O USUÁRIO NÃO SE IDENTIFIQUE: Não use a tag de reserva! Peça o nome dele de maneira muito educada, divertida e carinhosa com sotaque caipira antes de poder confirmar.
             """
             
-            # FORMATO BLINDADO CONTRA ERRO 400: Transformar tudo em uma única grande String
             prompt_completo_seguro = f"{prompt_sistema}\n\n[MENSAGEM DO USUÁRIO]: {user_input}"
             
             resposta_ia = modelo.generate_content(prompt_completo_seguro).text
@@ -174,7 +172,7 @@ if user_input:
                 st.write(resposta_ia)
                 
         except Exception as e:
-            st.error(f"🤖 ERRO DA IA: Não foi possível processar a mensagem (Erro 400/404). Detalhe: {e}")
+            st.error(f"🤖 ERRO DA IA: Não foi possível processar a mensagem. Detalhe: {e}")
 
 # ==========================================
 # SESSÃO DE UPLOAD DO PIX
